@@ -23,7 +23,7 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='training batch size (default: 64)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
-parser.add_argument('--load-model-path', type=str, default="./cifar10_vgg16_pretrained.pt",
+parser.add_argument('--load-model-path', type=str, default="./cifar10_vgg13.pt",
                     help='Path to pretrained model')
 parser.add_argument('--sparsity-type', type=str, default='unstructured',
                     help="define sparsity_type: [unstructured, filter, etc.]")
@@ -142,6 +142,22 @@ def unstructured_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
 
     # return the mask to record the pruning location ()
 
+    # # Step 1: Calculate how many weights should be pruned
+    # num_elements = tensor.numel()
+    # num_pruned = num_elements * sparsity
+    # print(num_pruned)
+    # print(num_elements)
+    # # Step 2: Find the threshold of weight magnitude (th) based on sparsity
+    # # Flatten tensor, get absolute values, sort them, and select the pruning threshold
+    # flattened_tensor = tensor.view(-1).abs()
+    # threshold = torch.topk(flattened_tensor, num_elements - num_pruned, largest=False).values.max()
+
+    # # Step 3: Get the pruning mask tensor based on the threshold
+    # # Values below or equal to the threshold are pruned (set to 0 in the mask)
+    # mask = (tensor.abs() > threshold).float()
+
+
+
     num_elements = tensor.numel()
     num_pruned = int(num_elements * sparsity)
     num_pruned = min(num_pruned, num_elements - 1)
@@ -150,9 +166,7 @@ def unstructured_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
     flat_tensor = tensor.view(-1) 
     threshold = torch.kthvalue(torch.abs(flat_tensor), num_pruned)[0]  
 
-
     mask = (torch.abs(tensor) > threshold).float()
-
 
     return mask
 
@@ -192,7 +206,6 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
     # call unstructured_prune()  
     # or 
     # call filter_prune (...)
-    sparsity=0.8
     # print(dict(model.named_parameters()))
     print()
     print("=========================layer names====================================")
@@ -202,18 +215,18 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
     print("=========================layer names====================================")
     print()    
     # print(flattened_weights)
+    prune_masks_store = {}  
     if sparity_type =='unstructured':
         for layer_name, tensor in prune_ratio_dict.items():
                 # layer = dict(model.named_parameters())[layer_name]
                 # print(layer_name)
-                
             pruning_mask = unstructured_prune(dict(model.named_parameters())[layer_name],tensor)
+            prune_masks_store[layer_name] = pruning_mask
             # print(pruning_mask)
             with torch.no_grad(): 
                 layer = dict(model.named_parameters())[layer_name] 
                 layer.data *= pruning_mask  
-        model_path = './model.pth' 
-        torch.save(model.state_dict(), model_path)
+        return model,prune_masks_store
     elif sparity_type =='filter':
         pass        
     else:
@@ -256,34 +269,77 @@ def test_sparity(model, sparisty_type):
     # total number of filters: 2944, empty-filters: 0, overall filter sparsity is: 0.0000
 
 
-def masked_retrain():
-    pass
-    # when you fine-tune your pruned model, you only want to update the remaining weights (i.e., the weights that are not pruned),
-    # while keeping the pruned weights to be 0.
-    # A simple way to achieve this is:
-    #   1. before update the weights, you find the pruning mask first.
-    #   2. update all weights (including both remained and pruned weights).
-    #   3. based on the pruning mask, prune the weights again.
-    #      In this way, you can "keep" the pruned weights to be 0 after a training iteration.
-    # then manually pruned the weights again ()
+# def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1):
+#     pass
+#     # when you fine-tune your pruned model, you only want to update the remaining weights (i.e., the weights that are not pruned),
+#     # while keeping the pruned weights to be 0.
+#     # A simple way to achieve this is:
+#     #   1. before update the weights, you find the pruning mask first.
+#     #   2. update all weights (including both remained and pruned weights).
+#     #   3. based on the pruning mask, prune the weights again.
+#     #      In this way, you can "keep" the pruned weights to be 0 after a training iteration.
+#     # then manually pruned the weights again ()
 
-    # Example:
-    # For each training iteration
-    #       ...
-    #       optimizer.zero_grad()
-    #       loss.backward()
-    #       optimizer.step()
-    #       # Here you may need a loop to loop over entire model layer by layer, then
-    #       weight = weight * mask 
+#     # Example:
+#     # For each training iteration
+#     #       ...
+#     #       optimizer.zero_grad()
+#     #       loss.backward()
+#     #       optimizer.step()
+#     #       # Here you may need a loop to loop over entire model layer by layer, then
+#     #       weight = weight * mask 
 
 
-def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict):
+def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1):
+    """
+    Fine-tune the pruned model, updating only the unpruned weights, and print the accuracy for each iteration.
+    
+    :param model: nn.Module, the pruned model to fine-tune
+    :param prune_masks: dict, dictionary containing the pruning mask for each layer
+    :param optimizer: optimizer, optimizer for training the model
+    :param loss_fn: loss function, criterion to calculate the loss
+    :param data_loader: data loader, provides batches of input data and targets
+    :param num_epochs: int, number of epochs to retrain the model
+    """
+    model.train()  # Set model to training mode
+    
+    for epoch in range(num_epochs):
+        for batch_idx, (inputs, targets) in enumerate(data_loader):
+            # Forward pass
+            outputs = model(inputs)
+            loss = loss_fn(outputs, targets)
+            
+            # Compute accuracy for the current batch
+            _, predicted = torch.max(outputs, 1)
+            correct = (predicted == targets).sum().item()
+            accuracy = correct / targets.size(0) * 100  # percentage
+            
+            # Backward pass and optimization
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            # Reapply the pruning mask to keep pruned weights at zero
+            with torch.no_grad():
+                for layer_name, mask in prune_masks.items():
+                    # Retrieve the weight tensor for each layer using the layer name
+                    layer = dict(model.named_parameters())[layer_name]
+                    # Reapply mask to maintain pruned weights at zero
+                    layer.data *= mask
+            
+            # Print loss and accuracy for each iteration
+            print(f"Epoch [{epoch + 1}/{num_epochs}], Batch [{batch_idx + 1}/{len(data_loader)}], "
+                  f"Loss: {loss.item():.4f}, Accuracy: {accuracy:.2f}%")
 
-    apply_pruning(model, sparity_type, prune_ratio_dict)
 
+
+def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,optimizer,loss_fn):
+
+    model,prune_masks=apply_pruning(model, sparity_type, prune_ratio_dict)
+    # masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, num_epochs=5)
+    
     # masked_retrain()
-
-
+    
     # Implement the function that conducting oneshot magnitude pruning
     # Target sparsity ratio dict should contains the sparsity ratio of each layer
     # the per-layer sparsity ratio should be read from a external .yaml file
@@ -381,9 +437,11 @@ def main():
     print(args.sparsity_type,prune_ratio_dict)
     print("=========================================loaded dictonary===========================================================")
     print()
-    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict)
+    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,optimizer,criterion)
 
 
 
 if __name__ == '__main__':
     main()
+
+#python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10

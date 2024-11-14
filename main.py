@@ -206,7 +206,6 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
     # call unstructured_prune()  
     # or 
     # call filter_prune (...)
-    # print(dict(model.named_parameters()))
     print()
     print("=========================layer names====================================")
     for name, param in model.named_parameters():
@@ -214,7 +213,6 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
         # print(f"Shape: {param.shape}")
     print("=========================layer names====================================")
     print()    
-    # print(flattened_weights)
     prune_masks_store = {}  
     if sparity_type =='unstructured':
         for layer_name, tensor in prune_ratio_dict.items():
@@ -290,9 +288,9 @@ def test_sparity(model, sparisty_type):
 #     #       weight = weight * mask 
 
 
-def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1):
+def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1, device='cuda'):
     """
-    Fine-tune the pruned model, updating only the unpruned weights, and print the accuracy for each iteration.
+    Fine-tune the pruned model, updating only the unpruned weights, and print the accuracy after each epoch.
     
     :param model: nn.Module, the pruned model to fine-tune
     :param prune_masks: dict, dictionary containing the pruning mask for each layer
@@ -300,19 +298,30 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epoc
     :param loss_fn: loss function, criterion to calculate the loss
     :param data_loader: data loader, provides batches of input data and targets
     :param num_epochs: int, number of epochs to retrain the model
+    :param device: str, device to use for training ('cuda' or 'cpu')
     """
+    # Move the model to the specified device (e.g., 'cuda' or 'cpu')
+    model.to(device)
     model.train()  # Set model to training mode
     
     for epoch in range(num_epochs):
+        total_correct = 0
+        total_samples = 0
+        epoch_loss = 0
+
         for batch_idx, (inputs, targets) in enumerate(data_loader):
+            # Move inputs and targets to the same device as the model
+            inputs, targets = inputs.to(device), targets.to(device)
+            
             # Forward pass
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
             
             # Compute accuracy for the current batch
             _, predicted = torch.max(outputs, 1)
-            correct = (predicted == targets).sum().item()
-            accuracy = correct / targets.size(0) * 100  # percentage
+            total_correct += (predicted == targets).sum().item()
+            total_samples += targets.size(0)
+            epoch_loss += loss.item()
             
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -326,17 +335,19 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epoc
                     layer = dict(model.named_parameters())[layer_name]
                     # Reapply mask to maintain pruned weights at zero
                     layer.data *= mask
-            
-            # Print loss and accuracy for each iteration
-            print(f"Epoch [{epoch + 1}/{num_epochs}], Batch [{batch_idx + 1}/{len(data_loader)}], "
-                  f"Loss: {loss.item():.4f}, Accuracy: {accuracy:.2f}%")
 
+        # Calculate epoch accuracy and average loss
+        epoch_accuracy = (total_correct / total_samples) * 100  # as a percentage
+        avg_loss = epoch_loss / len(data_loader)  # average loss per batch in this epoch
+
+        # Print loss and accuracy for each epoch
+        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}, Accuracy: {epoch_accuracy:.2f}%")
 
 
 def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,optimizer,loss_fn):
 
     model,prune_masks=apply_pruning(model, sparity_type, prune_ratio_dict)
-    # masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, num_epochs=5)
+    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, num_epochs=5)
     
     # masked_retrain()
     

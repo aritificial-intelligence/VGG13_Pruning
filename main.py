@@ -217,7 +217,16 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
                 layer.data *= pruning_mask  
         return model,prune_masks_store
     elif sparity_type =='filter':
-        pass        
+        for layer_name, tensor in prune_ratio_dict.items():
+                # layer = dict(model.named_parameters())[layer_name]
+                # print(layer_name)
+            pruning_mask = filter_prune(dict(model.named_parameters())[layer_name],tensor)
+            prune_masks_store[layer_name] = pruning_mask
+            # print(pruning_mask)
+            with torch.no_grad(): 
+                layer = dict(model.named_parameters())[layer_name] 
+                layer.data *= pruning_mask  
+        return model,prune_masks_store   
     else:
         raise ValueError("Invalid sparsity type. Only 'unstructured' and 'filter' are supported.")    
 
@@ -279,29 +288,31 @@ def test_sparity(model, sparisty_type):
 #     #       weight = weight * mask 
 
 
-def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1, device='cuda'):
+def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_data_loader, num_epochs=1, device='cuda'):
     """
-    Fine-tune the pruned model, updating only the unpruned weights, and print the accuracy after each epoch.
-    
+    Fine-tune the pruned model, updating only the unpruned weights, and print the accuracy after each epoch on both
+    the training and test data.
+
     :param model: nn.Module, the pruned model to fine-tune
     :param prune_masks: dict, dictionary containing the pruning mask for each layer
     :param optimizer: optimizer, optimizer for training the model
     :param loss_fn: loss function, criterion to calculate the loss
     :param data_loader: data loader, provides batches of input data and targets
+    :param test_data_loader: test data loader, provides batches of test input data and targets
     :param num_epochs: int, number of epochs to retrain the model
     :param device: str, device to use for training ('cuda' or 'cpu')
     """
     # Move the model to the specified device (e.g., 'cuda' or 'cpu')
     model.to(device)
-    model.train()  # Set model to training mode
     
     for epoch in range(num_epochs):
-        total_correct = 0
-        total_samples = 0
-        epoch_loss = 0
+        # Training phase
+        model.train()  # Set model to training mode
+        total_correct_train = 0
+        total_samples_train = 0
+        epoch_loss_train = 0
 
         for batch_idx, (inputs, targets) in enumerate(data_loader):
-            # Move inputs and targets to the same device as the model
             inputs, targets = inputs.to(device), targets.to(device)
             
             # Forward pass
@@ -310,9 +321,9 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epoc
             
             # Compute accuracy for the current batch
             _, predicted = torch.max(outputs, 1)
-            total_correct += (predicted == targets).sum().item()
-            total_samples += targets.size(0)
-            epoch_loss += loss.item()
+            total_correct_train += (predicted == targets).sum().item()
+            total_samples_train += targets.size(0)
+            epoch_loss_train += loss.item()
             
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -322,23 +333,46 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epoc
             # Reapply the pruning mask to keep pruned weights at zero
             with torch.no_grad():
                 for layer_name, mask in prune_masks.items():
-                    # Retrieve the weight tensor for each layer using the layer name
                     layer = dict(model.named_parameters())[layer_name]
-                    # Reapply mask to maintain pruned weights at zero
                     layer.data *= mask
 
-        # Calculate epoch accuracy and average loss
-        epoch_accuracy = (total_correct / total_samples) * 100  # as a percentage
-        avg_loss = epoch_loss / len(data_loader)  # average loss per batch in this epoch
+        # Calculate training accuracy and average loss
+        train_accuracy = (total_correct_train / total_samples_train) * 100
+        avg_train_loss = epoch_loss_train / len(data_loader)
 
-        # Print loss and accuracy for each epoch
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}, Accuracy: {epoch_accuracy:.2f}%")
+        # Evaluation phase on test data
+        model.eval()  # Set model to evaluation mode
+        total_correct_test = 0
+        total_samples_test = 0
+        epoch_loss_test = 0
+        
+        with torch.no_grad():
+            for inputs, targets in test_data_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                
+                # Forward pass
+                outputs = model(inputs)
+                loss = loss_fn(outputs, targets)
+                
+                # Compute accuracy for the test batch
+                _, predicted = torch.max(outputs, 1)
+                total_correct_test += (predicted == targets).sum().item()
+                total_samples_test += targets.size(0)
+                epoch_loss_test += loss.item()
+        
+        # Calculate test accuracy and average loss
+        test_accuracy = (total_correct_test / total_samples_test) * 100
+        avg_test_loss = epoch_loss_test / len(test_data_loader)
 
+        # Print loss and accuracy for each epoch on both training and test data
+        print(f"Epoch [{epoch + 1}/{num_epochs}]")
+        print(f"    Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}%")
+        print(f"    Test Loss: {avg_test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
-def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,optimizer,loss_fn,epochs):
+def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
 
     model,prune_masks=apply_pruning(model, sparity_type, prune_ratio_dict)
-    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, epochs)
+    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
     
     # masked_retrain()
     
@@ -394,7 +428,7 @@ def main():
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-
+    print(device)
     # setup random seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -439,7 +473,7 @@ def main():
     print(args.sparsity_type,prune_ratio_dict)
     print("=========================================loaded dictonary===========================================================")
     print()
-    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,optimizer,criterion,args.epochs)
+    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
 
 
 

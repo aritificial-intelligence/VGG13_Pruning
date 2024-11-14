@@ -142,21 +142,6 @@ def unstructured_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
 
     # return the mask to record the pruning location ()
 
-    # # Step 1: Calculate how many weights should be pruned
-    # num_elements = tensor.numel()
-    # num_pruned = num_elements * sparsity
-    # print(num_pruned)
-    # print(num_elements)
-    # # Step 2: Find the threshold of weight magnitude (th) based on sparsity
-    # # Flatten tensor, get absolute values, sort them, and select the pruning threshold
-    # flattened_tensor = tensor.view(-1).abs()
-    # threshold = torch.topk(flattened_tensor, num_elements - num_pruned, largest=False).values.max()
-
-    # # Step 3: Get the pruning mask tensor based on the threshold
-    # # Values below or equal to the threshold are pruned (set to 0 in the mask)
-    # mask = (tensor.abs() > threshold).float()
-
-
 
     num_elements = tensor.numel()
     num_pruned = int(num_elements * sparsity)
@@ -195,6 +180,12 @@ def filter_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
 
     ##################### YOUR CODE ENDS HERE #######################
 
+    filter_norms = tensor.norm(p=2, dim=[1, 2, 3] if tensor.ndimension() == 4 else [1])
+    num_filters = tensor.size(0)
+    num_pruned_filters = int(sparsity * num_filters)
+    threshold = torch.kthvalue(filter_norms.view(-1), num_pruned_filters).values
+    mask = filter_norms > threshold
+    mask = mask.float().to(tensor.device)  # Ensure mask is the same dtype as tensor
     # return the mask to record the pruning location ()
     return mask
 
@@ -344,10 +335,10 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epoc
         print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}, Accuracy: {epoch_accuracy:.2f}%")
 
 
-def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,optimizer,loss_fn):
+def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,optimizer,loss_fn,epochs):
 
     model,prune_masks=apply_pruning(model, sparity_type, prune_ratio_dict)
-    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, num_epochs=5)
+    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, epochs)
     
     # masked_retrain()
     
@@ -448,7 +439,7 @@ def main():
     print(args.sparsity_type,prune_ratio_dict)
     print("=========================================loaded dictonary===========================================================")
     print()
-    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,optimizer,criterion)
+    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,optimizer,criterion,args.epochs)
 
 
 
@@ -456,3 +447,4 @@ if __name__ == '__main__':
     main()
 
 #python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10
+#python main.py --sparsity-method omp --sparsity-type filter --epochs 10

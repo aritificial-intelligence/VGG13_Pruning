@@ -51,28 +51,51 @@
   # classifier.bias: 0.0
 
 
-prune_ratios:
+prune_ratios_unstructured:
   # Convolutional Layers
   # features.0.weight: 0.5  # First Conv Layer
-  features.3.weight: 0.8  # Second Conv Layer
-  features.4.weight: 0.8  # Third Conv Layer
-  features.7.weight: 0.8  # Fourth Conv Layer
-  features.8.weight: 0.8  # Fifth Conv Layer
-  features.10.weight: 0.9 # Sixth Conv Layer
-  features.11.weight: 0.9 # Seventh Conv Layer
-  features.14.weight: 0.8 # Eighth Conv Layer
-  features.15.weight: 0.8 # Ninth Conv Layer
-  features.17.weight: 0.8 # Tenth Conv Layer
-  features.18.weight: 0.8 # Eleventh Conv Layer
-  features.21.weight: 0.8 # Twelfth Conv Layer
-  features.22.weight: 0.8 # Thirteenth Conv Layer
-  features.24.weight: 0.8 # Fourteenth Conv Layer
-  features.25.weight: 0.8 # Fifteenth Conv Layer
-  features.28.weight: 0.8 # Sixteenth Conv Layer
-  features.29.weight: 0.8 # Seventeenth Conv Layer
-  features.31.weight: 0.8 # Eighteenth Conv Layer
-  features.32.weight: 0.8 # Nineteenth Conv Layer
+  features.3.weight: 0.8  
+  features.4.weight: 0.8  
+  features.7.weight: 0.8  
+  features.8.weight: 0.8 
+  features.10.weight: 0.9 
+  features.11.weight: 0.9 
+  features.14.weight: 0.8 
+  features.15.weight: 0.8 
+  features.17.weight: 0.8 
+  features.18.weight: 0.8 
+  features.21.weight: 0.8 
+  features.22.weight: 0.8 
+  features.24.weight: 0.8 
+  features.25.weight: 0.8 
+  features.28.weight: 0.8 
+  features.29.weight: 0.8 
+  features.31.weight: 0.8 
+  features.32.weight: 0.8 
 
+
+
+prune_ratios_filter:
+  # Convolutional Layers
+  # features.0.weight: 0.5  # First Conv Layer
+  features.3.weight: 0.4  
+  features.4.weight: 0.4  
+  features.7.weight: 0.4  
+  features.8.weight: 0.6  
+  features.10.weight: 0.6 
+  features.11.weight: 0.4 
+  features.14.weight: 0.6 
+  features.15.weight: 0.4 
+  features.17.weight: 0.4 
+  features.18.weight: 0.4 
+  features.21.weight: 0.4 
+  features.22.weight: 0.4 
+  features.24.weight: 0.4 
+  features.25.weight: 0.4 
+  features.28.weight: 0.4 
+  features.29.weight: 0.4 
+  features.31.weight: 0.4 
+  features.32.weight: 0.4 
 #   # Fully Connected (Linear) Layers
 #   # classifier.weight: 0.5  # Fully Connected Layer (Linear layer before output)
 #   # classifier.bias: 0.5    # Fully Connected Layer Bias

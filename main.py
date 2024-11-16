@@ -23,7 +23,7 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='training batch size (default: 64)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
-parser.add_argument('--load-model-path', type=str, default="./cifar10_vgg13.pt",
+parser.add_argument('--load-model-path', type=str, default="./model/cifar10_vgg13_acc_94.730.pt",
                     help='Path to pretrained model')
 parser.add_argument('--sparsity-type', type=str, default='unstructured',
                     help="define sparsity_type: [unstructured, filter, etc.]")
@@ -87,7 +87,7 @@ def get_dataloaders(args):
 
 # ============= the functions that you need to complete start from here =============
 
-def read_prune_ratios_from_yaml(file_name, model):
+def read_prune_ratios_from_yaml(file_name, model,sparsity_type):
 
         """
             This function will read user-defined layer-wise target pruning ratios from yaml file.
@@ -104,12 +104,12 @@ def read_prune_ratios_from_yaml(file_name, model):
         with open(file_name, "r") as stream:
             try:
                 raw_dict = yaml.safe_load(stream)
-                prune_ratio_dict = raw_dict['prune_ratios']
-
-                # ===== your code starts from here ======
+                prune_ratio_dict = {}
+                if sparsity_type=='unstructured':
+                    prune_ratio_dict = raw_dict['prune_ratios_unstructured']
+                elif sparsity_type=='filter':
+                    prune_ratio_dict = raw_dict['prune_ratios_filter']
                 
-                # ===== your code ends here ======
-
                 return prune_ratio_dict
 
             except yaml.YAMLError as exc:
@@ -155,55 +155,6 @@ def unstructured_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
 
     return mask
 
-
-
-
-
-def filter_prune(tensor: torch.Tensor, sparsity: float) -> torch.Tensor:
-    """
-    Perform L2-norm-based filter pruning for the weight tensor of a layer.
-
-    Args:
-        tensor: torch.Tensor, the weight of a convolutional layer (4D: [out_channels, in_channels, h, w]).
-        sparsity: float, the fraction of filters to prune (between 0 and 1).
-
-    Returns:
-        torch.Tensor, pruning mask with the same shape as the input tensor (1 for non-pruned, 0 for pruned).
-    """
-    # Check the dimensions of the tensor
-    if tensor.shape != 4:
-            num_elements = tensor.numel()
-            num_pruned = int(num_elements * sparsity)
-            num_pruned = min(num_pruned, num_elements - 1)
-            if num_pruned == 0:
-                return torch.ones_like(tensor)
-            flat_tensor = tensor.view(-1) 
-            threshold = torch.kthvalue(torch.abs(flat_tensor), num_pruned)[0]  
-
-            mask = (torch.abs(tensor) > threshold).float()
-            
-            return mask
-
-        # raise ValueError(f"Expected a 4D tensor, but got {tensor.ndim}D tensor with shape {tensor.shape}")
-
-    # Get the dimensions of the weight tensor
-    out_channels, in_channels, height, width = tensor.shape
-    print(f"Filter dimensions: {out_channels} filters, each with shape ({in_channels}, {height}, {width})")
-
-    num_filters = out_channels  # Number of filters in the layer
- 
- 
-    num_elements = tensor.numel()
-    num_pruned = int(num_elements * sparsity)
-    num_pruned = min(num_pruned, num_elements - 1)
-    if num_pruned == 0:
-        return torch.ones_like(tensor)
-    flat_tensor = tensor.view(-1) 
-    threshold = torch.kthvalue(torch.abs(flat_tensor), num_pruned)[0]  
-
-    mask = (torch.abs(tensor) > threshold).float()
-    
-    return mask
 
 
 
@@ -451,7 +402,7 @@ def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,
     masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
     test_sparity(model, sparsity_type)
     # masked_retrain()
-    
+    test(model, 'cuda', test_loader)
     # Implement the function that conducting oneshot magnitude pruning
     # Target sparsity ratio dict should contains the sparsity ratio of each layer
     # the per-layer sparsity ratio should be read from a external .yaml file
@@ -543,11 +494,11 @@ def main():
     # test(model, device, test_loader)
 
     # ========================================
-    prune_ratio_dict=read_prune_ratios_from_yaml(args.yaml_path,args.load_model_path)
+    prune_ratio_dict=read_prune_ratios_from_yaml(args.yaml_path,args.load_model_path,args.sparsity_type)
     print()
-    print("=========================================loaded dictonary===========================================================")
+    print("=========================================loaded yaml dictonary===========================================================")
     print(args.sparsity_type,prune_ratio_dict)
-    print("=========================================loaded dictonary===========================================================")
+    print("=========================================loaded yaml dictonary===========================================================")
     print()
     oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
 

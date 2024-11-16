@@ -16,62 +16,62 @@
 
 
 
-prune_ratios:
-  # features.0.weight: 0.0
-  features.1.weight: 0.8
-  features.1.bias: 0.8
-  features.3.weight: 0.8
-  features.4.weight: 0.8
-  features.4.bias: 0.8
-  features.7.weight: 0.8
-  features.8.weight: 0.8
-  features.8.bias: 0.8
-  features.10.weight: 0.8
-  features.11.weight: 0.8
-  features.11.bias: 0.8
-  features.14.weight: 0.8
-  features.15.weight: 0.8
-  features.15.bias: 0.8
-  features.17.weight: 0.8
-  features.18.weight: 0.8
-  features.18.bias: 0.8
-  features.21.weight: 0.8
-  features.22.weight: 0.8
-  features.22.bias: 0.8
-  features.24.weight: 0.8
-  features.25.weight: 0.8
-  features.25.bias: 0.8
-  features.28.weight: 0.8
-  features.29.weight: 0.8
-  features.29.bias: 0.8
-  features.31.weight: 0.8
-  features.32.weight: 0.8
-  features.32.bias: 0.8
+# prune_ratios:
+#   # features.0.weight: 0.0
+#   features.1.weight: 0.8
+#   features.1.bias: 0.8
+#   features.3.weight: 0.8
+#   features.4.weight: 0.8
+#   features.4.bias: 0.8
+#   features.7.weight: 0.8
+#   features.8.weight: 0.8
+#   features.8.bias: 0.8
+#   features.10.weight: 0.8
+#   features.11.weight: 0.8
+#   features.11.bias: 0.8
+#   features.14.weight: 0.8
+#   features.15.weight: 0.8
+#   features.15.bias: 0.8
+#   features.17.weight: 0.8
+#   features.18.weight: 0.8
+#   features.18.bias: 0.8
+#   features.21.weight: 0.8
+#   features.22.weight: 0.8
+#   features.22.bias: 0.8
+#   features.24.weight: 0.8
+#   features.25.weight: 0.8
+#   features.25.bias: 0.8
+#   features.28.weight: 0.8
+#   features.29.weight: 0.8
+#   features.29.bias: 0.8
+#   features.31.weight: 0.8
+#   features.32.weight: 0.8
+  # features.32.bias: 0.8
   # classifier.weight: 0.0
   # classifier.bias: 0.0
 
 
-# prune_ratios:
-#   # Convolutional Layers
-#   # features.0.weight: 0.5  # First Conv Layer
-#   features.3.weight: 0.5  # Second Conv Layer
-#   features.4.weight: 0.5  # Third Conv Layer
-#   features.7.weight: 0.5  # Fourth Conv Layer
-#   features.8.weight: 0.5  # Fifth Conv Layer
-#   features.10.weight: 0.5 # Sixth Conv Layer
-#   features.11.weight: 0.5 # Seventh Conv Layer
-#   features.14.weight: 0.5 # Eighth Conv Layer
-#   features.15.weight: 0.5 # Ninth Conv Layer
-#   features.17.weight: 0.5 # Tenth Conv Layer
-#   features.18.weight: 0.5 # Eleventh Conv Layer
-#   features.21.weight: 0.5 # Twelfth Conv Layer
-#   features.22.weight: 0.5 # Thirteenth Conv Layer
-#   features.24.weight: 0.5 # Fourteenth Conv Layer
-#   features.25.weight: 0.5 # Fifteenth Conv Layer
-#   features.28.weight: 0.5 # Sixteenth Conv Layer
-#   features.29.weight: 0.5 # Seventeenth Conv Layer
-#   features.31.weight: 0.5 # Eighteenth Conv Layer
-#   features.32.weight: 0.5 # Nineteenth Conv Layer
+prune_ratios:
+  # Convolutional Layers
+  # features.0.weight: 0.5  # First Conv Layer
+  features.3.weight: 0.8  # Second Conv Layer
+  features.4.weight: 0.8  # Third Conv Layer
+  features.7.weight: 0.8  # Fourth Conv Layer
+  features.8.weight: 0.8  # Fifth Conv Layer
+  features.10.weight: 0.9 # Sixth Conv Layer
+  features.11.weight: 0.9 # Seventh Conv Layer
+  features.14.weight: 0.8 # Eighth Conv Layer
+  features.15.weight: 0.8 # Ninth Conv Layer
+  features.17.weight: 0.8 # Tenth Conv Layer
+  features.18.weight: 0.8 # Eleventh Conv Layer
+  features.21.weight: 0.8 # Twelfth Conv Layer
+  features.22.weight: 0.8 # Thirteenth Conv Layer
+  features.24.weight: 0.8 # Fourteenth Conv Layer
+  features.25.weight: 0.8 # Fifteenth Conv Layer
+  features.28.weight: 0.8 # Sixteenth Conv Layer
+  features.29.weight: 0.8 # Seventeenth Conv Layer
+  features.31.weight: 0.8 # Eighteenth Conv Layer
+  features.32.weight: 0.8 # Nineteenth Conv Layer
 
 #   # Fully Connected (Linear) Layers
 #   # classifier.weight: 0.5  # Fully Connected Layer (Linear layer before output)

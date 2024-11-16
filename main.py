@@ -156,38 +156,110 @@ def unstructured_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
     return mask
 
 
-def filter_prune(tensor: torch.Tensor, sparsity : float) -> torch.Tensor:
+
+
+
+def filter_prune(tensor: torch.Tensor, sparsity: float) -> torch.Tensor:
     """
-    implement L2-norm-based filter pruning for weight tensor (of a layer)
-    :param tensor: torch.(cuda.)Tensor, weight of conv/fc layer
-    :param sparsity: float, pruning sparsity
-  
-    :return:
-        torch.(cuda.)Tensor, pruning mask (1 for nonzeros, 0 for zeros)
+    Perform L2-norm-based filter pruning for the weight tensor of a layer.
+
+    Args:
+        tensor: torch.Tensor, the weight of a convolutional layer (4D: [out_channels, in_channels, h, w]).
+        sparsity: float, the fraction of filters to prune (between 0 and 1).
+
+    Returns:
+        torch.Tensor, pruning mask with the same shape as the input tensor (1 for non-pruned, 0 for pruned).
     """
+    # Check the dimensions of the tensor
+    if tensor.shape != 4:
+            num_elements = tensor.numel()
+            num_pruned = int(num_elements * sparsity)
+            num_pruned = min(num_pruned, num_elements - 1)
+            if num_pruned == 0:
+                return torch.ones_like(tensor)
+            flat_tensor = tensor.view(-1) 
+            threshold = torch.kthvalue(torch.abs(flat_tensor), num_pruned)[0]  
 
-    ##################### YOUR CODE STARTS HERE #####################
-    # Step 1: Calculate how many filters should be pruned
+            mask = (torch.abs(tensor) > threshold).float()
+            
+            return mask
 
-    # Step 2: Find the threshold of filter's L2-norm (th) based on sparsity.
+        # raise ValueError(f"Expected a 4D tensor, but got {tensor.ndim}D tensor with shape {tensor.shape}")
 
-    # Step 3: Get the pruning mask tensor based on the th. The mask tensor should have same shape as the weight tensor
-    #         ||filter||2 <= th -> mask=0,
-    #         ||filter||2 >  th -> mask=1
+    # Get the dimensions of the weight tensor
+    out_channels, in_channels, height, width = tensor.shape
+    print(f"Filter dimensions: {out_channels} filters, each with shape ({in_channels}, {height}, {width})")
 
-    # Step 4: Apply mask tensor to the weight tensor
-    #         weight_pruned = weight * mask
+    num_filters = out_channels  # Number of filters in the layer
+ 
+ 
+    num_elements = tensor.numel()
+    num_pruned = int(num_elements * sparsity)
+    num_pruned = min(num_pruned, num_elements - 1)
+    if num_pruned == 0:
+        return torch.ones_like(tensor)
+    flat_tensor = tensor.view(-1) 
+    threshold = torch.kthvalue(torch.abs(flat_tensor), num_pruned)[0]  
 
-    ##################### YOUR CODE ENDS HERE #######################
-
-    filter_norms = tensor.norm(p=2, dim=[1, 2, 3] if tensor.ndimension() == 4 else [1])
-    num_filters = tensor.size(0)
-    num_pruned_filters = int(sparsity * num_filters)
-    threshold = torch.kthvalue(filter_norms.view(-1), num_pruned_filters).values
-    mask = filter_norms > threshold
-    mask = mask.float().to(tensor.device)  # Ensure mask is the same dtype as tensor
-    # return the mask to record the pruning location ()
+    mask = (torch.abs(tensor) > threshold).float()
+    
     return mask
+
+
+
+
+def filter_prune(tensor: torch.Tensor, sparsity: float) -> torch.Tensor:
+    """
+    Implement L2-norm-based filter pruning for weight tensor (of a layer).
+
+    Args:
+        tensor (torch.Tensor): Weight of a convolutional layer (4D tensor).
+        sparsity (float): Fraction of filters to prune (between 0 and 1).
+
+    Returns:
+        torch.Tensor: Pruning mask (1 for nonzeros, 0 for zeros).
+    """
+    # If tensor is not 4D, return a mask with all ones
+    if tensor.ndim != 4:
+        print(f"Tensor is not 4D (shape: {tensor.shape}). Returning a mask with all ones.")
+        return torch.ones_like(tensor)
+
+    # Step 1: Calculate how many filters should be pruned
+    num_filters = tensor.shape[0]  # Number of output channels (filters)
+    num_prune = int(num_filters * sparsity)  # Number of filters to prune
+
+    # Step 2: Calculate L2 norm of each filter
+    # Flatten the filter weights to calculate L2 norm per filter
+    l2_norms = torch.norm(tensor.view(num_filters, -1), dim=1)
+
+    # Step 3: Determine the pruning threshold based on the sparsity
+    if num_prune > 0:
+        threshold = torch.topk(l2_norms, num_prune, largest=False).values[-1]
+    else:
+        threshold = 0.0
+
+    # Step 4: Generate the pruning mask
+    # Filters with L2 norm <= threshold will be pruned
+    mask = (l2_norms > threshold).float()  # Shape: [num_filters]
+
+    # Reshape the mask to match the weight tensor shape
+    mask = mask.view(-1, 1, 1, 1)  # Shape: [num_filters, 1, 1, 1]
+
+    # Convert mask to the same device and data type as the input tensor
+    mask = mask.to(dtype=tensor.dtype, device=tensor.device)
+
+
+    # Return the mask to indicate the pruning locations
+    return mask
+
+
+
+
+
+
+
+
+
 
 
 
@@ -233,59 +305,59 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
     
 
 
-def test_sparity(model, sparisty_type):
-    pass
-    # This function is used to check the model sparsity.
-    # It should be able to print the sparisty ratio of each layer.
 
-    # This example is obtained by testing a dense vgg13 model, 
-    # this is why the sparity and number of zeros are all 0.
-    # When you successfully pruned the model, then it should show the target sparisty ratio.
-    # In other words, if the sparity of your pruned model is 0%, this indicates there must be something wrong.
+def test_sparity(model, sparsity_type):
+    """
+    Check the sparsity of a model.
+    
+    Args:
+        model: The PyTorch model to analyze.
+        sparsity_type: "unstructured" or "filter", denoting the type of sparsity.
+    """
+    print(f"Sparsity type is: {sparsity_type}")
+    total_zeros = 0
+    total_nonzeros = 0
+    total_filters = 0
+    empty_filters = 0
 
-    # features.x.weight is the layer name. 
-    # You can the layer name and its weights by using the following for loop.
-    # for name, weight in model.named_parameters():
+    for name, param in model.named_parameters():
+        if "weight" in name and param.requires_grad:
+            if sparsity_type == "unstructured":
+                # Count zero and non-zero elements in the weight tensor
+                zeros = torch.sum(param == 0).item()
+                total = param.numel()
+                sparsity = zeros / total * 100
+                print(f"(zero/total) weights of {name} is: ({zeros}/{total}). Sparsity is: {sparsity:.2f}%")
+                total_zeros += zeros
+                total_nonzeros += total - zeros
 
-    # For sparisty_type="unstructured":
+            elif sparsity_type == "filter":
+                # Check filter sparsity (assume param is 4D: [out_channels, in_channels, h, w])
+                if param.dim() == 4:  # Only consider convolutional filters
+                    filters = param.shape[0]
+                    empty = 0
+                    for i in range(filters):
+                        if torch.sum(param[i]) == 0:
+                            empty += 1
+                    total_filters += filters
+                    empty_filters += empty
+                    sparsity = empty / filters * 100
+                    print(f"(empty/total) filter of {name} is: ({empty}/{filters}). Filter sparsity is: {sparsity:.2f}%")
 
-    # Sparsity type is: xxxx (e.g., unstructured pruned or filter pruned)
-    # (zero/total) weights of features.0.weight is: (0/1728). Sparsity is: 0.00%
-    # (zero/total) weights of features.3.weight is: (0/36864). Sparsity is: 0.00%
-    #       ...
-    #       ...
-    # ---------------------------------------------------------------------------
-    # total number of zeros: 0, non-zeros: 9402048, overall sparsity is: 0.0000
-
-    # For sparisty_type="filter":
-
-    # (empty/total) filter of features.0.weight is: (0/64). filter sparsity is: 0.00%
-    # (empty/total) filter of features.3.weight is: (0/64). filter sparsity is: 0.00%
-    #       ...
-    #       ...
-    # ---------------------------------------------------------------------------
-    # total number of filters: 2944, empty-filters: 0, overall filter sparsity is: 0.0000
+    print("---------------------------------------------------------------------------")
+    if sparsity_type == "unstructured":
+        total_params = total_zeros + total_nonzeros
+        overall_sparsity = total_zeros / total_params * 100
+        print(f"Total number of zeros: {total_zeros}, non-zeros: {total_nonzeros}, overall sparsity is: {overall_sparsity:.4f}%")
+    elif sparsity_type == "filter":
+        overall_filter_sparsity = empty_filters / total_filters * 100
+        print(f"Total number of filters: {total_filters}, empty-filters: {empty_filters}, overall filter sparsity is: {overall_filter_sparsity:.4f}%")
 
 
-# def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, num_epochs=1):
-#     pass
-#     # when you fine-tune your pruned model, you only want to update the remaining weights (i.e., the weights that are not pruned),
-#     # while keeping the pruned weights to be 0.
-#     # A simple way to achieve this is:
-#     #   1. before update the weights, you find the pruning mask first.
-#     #   2. update all weights (including both remained and pruned weights).
-#     #   3. based on the pruning mask, prune the weights again.
-#     #      In this way, you can "keep" the pruned weights to be 0 after a training iteration.
-#     # then manually pruned the weights again ()
 
-#     # Example:
-#     # For each training iteration
-#     #       ...
-#     #       optimizer.zero_grad()
-#     #       loss.backward()
-#     #       optimizer.step()
-#     #       # Here you may need a loop to loop over entire model layer by layer, then
-#     #       weight = weight * mask 
+
+
+
 
 
 def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_data_loader, num_epochs=1, device='cuda'):
@@ -306,6 +378,9 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_dat
     model.to(device)
     
     for epoch in range(num_epochs):
+        if epoch == 7:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 0.01
         # Training phase
         model.train()  # Set model to training mode
         total_correct_train = 0
@@ -368,12 +443,13 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_dat
         print(f"Epoch [{epoch + 1}/{num_epochs}]")
         print(f"    Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}%")
         print(f"    Test Loss: {avg_test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+        
 
-def oneshot_magnitude_prune(model, sparity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
+def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
 
-    model,prune_masks=apply_pruning(model, sparity_type, prune_ratio_dict)
+    model,prune_masks=apply_pruning(model, sparsity_type, prune_ratio_dict)
     masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
-    
+    test_sparity(model, sparsity_type)
     # masked_retrain()
     
     # Implement the function that conducting oneshot magnitude pruning
@@ -474,7 +550,6 @@ def main():
     print("=========================================loaded dictonary===========================================================")
     print()
     oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
-
 
 
 if __name__ == '__main__':

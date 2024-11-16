@@ -221,11 +221,11 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
     # or 
     # call filter_prune (...)
     print()
-    print("=========================layer names====================================")
-    for name, param in model.named_parameters():
-        print(f"{name}")
-        # print(f"Shape: {param.shape}")
-    print("=========================layer names====================================")
+    # print("=========================layer names====================================")
+    # for name, param in model.named_parameters():
+    #     print(f"{name}")
+    #     # print(f"Shape: {param.shape}")
+    # print("=========================layer names====================================")
     print()    
     prune_masks_store = {}  
     if sparity_type =='unstructured':
@@ -394,6 +394,7 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_dat
         print(f"Epoch [{epoch + 1}/{num_epochs}]")
         print(f"    Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}%")
         print(f"    Test Loss: {avg_test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+    return model 
         
 
 def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
@@ -402,6 +403,7 @@ def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,
     masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
     test_sparity(model, sparsity_type)
     # masked_retrain()
+    use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     test(model, device, test_loader)
     # Implement the function that conducting oneshot magnitude pruning
@@ -409,17 +411,38 @@ def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,
     # the per-layer sparsity ratio should be read from a external .yaml file
     # This function should also include the masked_retrain() function to conduct fine-tuning to restore the accuracy
 
-def iterative_magnitude_prune():
-    pass
-    # Implement the function that conducting iterative magnitude pruning
-    # Target sparsity ratio dict should contains the sparsity ratio of each layer
-    # the per-layer sparsity ratio should be read from a external .yaml file
-    # You can choose the way to gradually increase the pruning ratio.
-    # For example, if the overall target sparsity is 80%, 
-    # you can achieve it by 20%->40%->60%->80% or 50%->60%->70%->80% or something else e.g., in LTH paper.
-    # At each sparsity level, you need to retrain your model. 
-    # Therefore, this IMP method requires more overall training epochs than OMP.
-    # ** IMP method needs to use at least 3 iterations.
+def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_loader, test_loader, optimizer, loss_fn, epochs, use_cuda=False):
+
+
+    # Iterative pruning: start with a low sparsity and increase progressively
+    current_sparsity_dict = {k: 0.0 for k in target_sparsity_dict}  # Initial sparsity is 0% for all layers
+    num_iterations = 4 # One iteration per layer
+
+    for i in range(num_iterations):
+        # Gradually increase the sparsity level for each layer
+        for layer, target_sparsity in target_sparsity_dict.items():
+            # Increase sparsity by a certain ratio in each iteration (this could be done progressively)
+            current_sparsity_dict[layer] = min(current_sparsity_dict[layer] + (target_sparsity / num_iterations), target_sparsity)
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        # Apply pruning based on current sparsity ratio for each layer
+        model, prune_masks = apply_pruning(model, sparsity_type, current_sparsity_dict)
+        
+        # Retrain the model with the updated pruning mask
+        model=masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader, test_loader, epochs)
+        
+        # Evaluate the model after retraining
+        device = torch.device("cuda" if use_cuda else "cpu")
+        test(model, device, test_loader)
+
+        # Optionally, print the current sparsity for each layer after pruning
+        print(f"Iteration {i + 1}: Sparsity updated to {current_sparsity_dict}")
+    
+    # Final test to evaluate the model after all iterations
+    print("Final model evaluation:")
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    test(model, device, test_loader)
+
 
 def prune_channels_after_filter_prune():
     pass
@@ -501,7 +524,12 @@ def main():
     print(args.sparsity_type,prune_ratio_dict)
     print("=========================================loaded yaml dictonary===========================================================")
     print()
-    oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
+    if args.sparsity_method =='omp':
+        oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
+    elif args.sparsity_method == 'imp':
+        iterative_magnitude_prune(model, args.sparsity_type, prune_ratio_dict, train_loader, test_loader, optimizer, criterion, args.epochs, device)
+    else:
+        print("Invalid sparsity method. Choose either 'omp' or 'imp'.")
 
 
 if __name__ == '__main__':

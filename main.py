@@ -402,7 +402,8 @@ def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,
     masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
     test_sparity(model, sparsity_type)
     # masked_retrain()
-    test(model, 'cuda', test_loader)
+    device = torch.device("cuda" if use_cuda else "cpu")
+    test(model, device, test_loader)
     # Implement the function that conducting oneshot magnitude pruning
     # Target sparsity ratio dict should contains the sparsity ratio of each layer
     # the per-layer sparsity ratio should be read from a external .yaml file

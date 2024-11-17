@@ -534,7 +534,7 @@ def prune_channels_after_filter_prune(pruned_model):
     """
     layers = list(pruned_model.children())  # Get layers from the model
     # Iterate through layers
-    count=1
+    # count=1
     for i, layer in enumerate(layers):
         # Check if the current layer is a Sequential block
         if isinstance(layer, nn.Sequential):
@@ -547,9 +547,7 @@ def prune_channels_after_filter_prune(pruned_model):
                     pruned_indices = [
                         idx for idx in range(weights.size(0)) if torch.all(weights[idx] == 0)
                     ]
-                    
                     if pruned_indices:
-                        
                         # For each Conv2d layer after the current one, set corresponding weights to zero
                         for k in range(j + 1, len(sequential_layers)):
                             next_layer = sequential_layers[k]
@@ -557,34 +555,33 @@ def prune_channels_after_filter_prune(pruned_model):
                             if isinstance(next_layer, nn.Conv2d):
                                 # Next layer's weights
                                 next_weights = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
-                                weights2 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
-                                pruned_indices2 = [
-                                        idx for idx in range(weights2.size(0)) if torch.all(weights2[idx] == 0)
-                                ]
+                                
+                                # weights2 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                                # pruned_indices2 = [
+                                #         idx for idx in range(weights2.size(0)) if torch.all(weights2[idx] == 0)
+                                # ]
+
                                 # Set the weights corresponding to the pruned channels to zero
+                                mask = torch.ones_like(next_weights)  
                                 for pruned_idx in pruned_indices:
-                                    # Create a zero tensor of the same shape as the pruned weights
-                                    zero_weights = torch.zeros_like(next_weights[:, pruned_idx, :, :])
-
-                                    # Set the pruned channels to zero
-                                    next_weights[:, pruned_idx, :, :] = zero_weights
-
+                                    mask[pruned_idx, :, :, :] = 0  # Set pruned channels to zero in the mask
+                                next_weights *= mask  # Set pruned channels to zero
                                 # Update the next Conv2d layer weights
                                 next_layer.weight.data = next_weights
-                                if count==1:
-                                    print(pruned_indices)
-                                    weights1 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
-                                    pruned_indices1 = [
-                                        idx for idx in range(weights1.size(0)) if torch.all(weights1[idx] == 0)
-                                    ]
+                                # if count==1:
+                                #     print(pruned_indices)
+                                #     weights1 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                                #     pruned_indices1 = [
+                                #         idx for idx in range(weights1.size(0)) if torch.all(weights1[idx] == 0)
+                                #     ]
                                     # print(weights1)
                                     # print(next_layer.weight.data)
-                                    print(pruned_indices2)
-                                    print(pruned_indices1)
-                                    print(f"Filter at Position 4: {next_weights[4]}")  # 1st filter
+                                    # print(pruned_indices2)
+                                    # print(pruned_indices1)
+                                    # print(f"Filter at Position 4: {next_weights[4]}")  # 1st filter
                                     
                                     
-                                    count+=1
+                                    # count+=1
                                 break
 
     return pruned_model

@@ -86,6 +86,30 @@ def get_dataloaders(args):
 
 
 # ============= the functions that you need to complete start from here =============
+import torch
+
+def save_model(model, pruning_type, sparsity, accuracy,sparsity_type, save_path="./"):
+    """
+    Saves the model with a specific naming convention.
+
+    Args:
+        model: The model to be saved.
+        pruning_type: Type of pruning (e.g., "omp", "imp").
+        sparsity: Sparsity level as a float or string (e.g., 0.80 or "0.80").
+        accuracy: Accuracy of the model as a float or string (e.g., 0.85 or "0.85").
+        save_path: The directory path where the model will be saved.
+    """
+    # Ensure sparsity and accuracy are floats
+    sparsity = float(sparsity)
+    accuracy = float(accuracy)
+
+    # Create the filename based on the convention
+    filename = f"{pruning_type}_{sparsity_type}_{sparsity:.2f}_acc_{accuracy:.3f}.pt"
+    
+    # Save the model state_dict
+    torch.save(model.state_dict(), f"{save_path}/{filename}")
+    print(f"Model saved as: {filename}")
+
 
 def read_prune_ratios_from_yaml(file_name, model,sparsity_type):
 
@@ -172,7 +196,7 @@ def filter_prune(tensor: torch.Tensor, sparsity: float) -> torch.Tensor:
     """
     # If tensor is not 4D, return a mask with all ones
     if tensor.ndim != 4:
-        print(f"Tensor is not 4D (shape: {tensor.shape}). Returning a mask with all ones.")
+        # print(f"Tensor is not 4D (shape: {tensor.shape}). Returning a mask with all ones.")
         return torch.ones_like(tensor)
 
     # Step 1: Calculate how many filters should be pruned
@@ -300,9 +324,11 @@ def test_sparity(model, sparsity_type):
         total_params = total_zeros + total_nonzeros
         overall_sparsity = total_zeros / total_params * 100
         print(f"Total number of zeros: {total_zeros}, non-zeros: {total_nonzeros}, overall sparsity is: {overall_sparsity:.4f}%")
+        return overall_sparsity
     elif sparsity_type == "filter":
         overall_filter_sparsity = empty_filters / total_filters * 100
         print(f"Total number of filters: {total_filters}, empty-filters: {empty_filters}, overall filter sparsity is: {overall_filter_sparsity:.4f}%")
+        return overall_filter_sparsity
 
 
 
@@ -394,18 +420,21 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_dat
         print(f"Epoch [{epoch + 1}/{num_epochs}]")
         print(f"    Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}%")
         print(f"    Test Loss: {avg_test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+    print()
+    print()
     return model 
         
 
 def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
 
     model,prune_masks=apply_pruning(model, sparsity_type, prune_ratio_dict)
-    masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
-    test_sparity(model, sparsity_type)
+    model=masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
+    sparsity=test_sparity(model, sparsity_type)
     # masked_retrain()
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    test(model, device, test_loader)
+    accuracy=test(model, device, test_loader)
+    save_model(model, 'omp', sparsity, accuracy,sparsity_type)
     # Implement the function that conducting oneshot magnitude pruning
     # Target sparsity ratio dict should contains the sparsity ratio of each layer
     # the per-layer sparsity ratio should be read from a external .yaml file
@@ -417,13 +446,12 @@ def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_
     # Iterative pruning: start with a low sparsity and increase progressively
     current_sparsity_dict = {k: 0.0 for k in target_sparsity_dict}  # Initial sparsity is 0% for all layers
     num_iterations = 4 # One iteration per layer
-
+    sparsity, accuracy=-1,-1
     for i in range(num_iterations):
         # Gradually increase the sparsity level for each layer
         for layer, target_sparsity in target_sparsity_dict.items():
             # Increase sparsity by a certain ratio in each iteration (this could be done progressively)
             current_sparsity_dict[layer] = min(current_sparsity_dict[layer] + (target_sparsity / num_iterations), target_sparsity)
-        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         # Apply pruning based on current sparsity ratio for each layer
         model, prune_masks = apply_pruning(model, sparsity_type, current_sparsity_dict)
         
@@ -432,16 +460,18 @@ def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_
         
         # Evaluate the model after retraining
         device = torch.device("cuda" if use_cuda else "cpu")
-        test(model, device, test_loader)
-
+        #test(model, device, test_loader)
+        
         # Optionally, print the current sparsity for each layer after pruning
         print(f"Iteration {i + 1}: Sparsity updated to {current_sparsity_dict}")
+    sparsity=test_sparity(model, sparsity_type)
     
     # Final test to evaluate the model after all iterations
     print("Final model evaluation:")
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    test(model, device, test_loader)
+    accuracy=test(model, device, test_loader)
+    save_model(model, 'imp', sparsity, accuracy,sparsity_type)
 
 
 def prune_channels_after_filter_prune():
@@ -537,3 +567,5 @@ if __name__ == '__main__':
 
 #python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10
 #python main.py --sparsity-method omp --sparsity-type filter --epochs 10
+#python main.py --sparsity-method imp --sparsity-type unstructured --epochs 10
+#python main.py --sparsity-method imp --sparsity-type filter --epochs 10

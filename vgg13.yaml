@@ -54,7 +54,7 @@
 prune_ratios_unstructured:
   # Convolutional Layers
   # features.0.weight: 0.5  # First Conv Layer
-  features.3.weight: 0.8  
+  features.3.weight: 0.8   # conv layer 
   features.4.weight: 0.8  
   features.7.weight: 0.8  
   features.8.weight: 0.8 

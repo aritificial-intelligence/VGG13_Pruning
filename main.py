@@ -12,7 +12,8 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 import numpy as np
 import yaml
-
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 from vgg_cifar import vgg13
 
 # settings
@@ -31,7 +32,8 @@ parser.add_argument('--sparsity-method', type=str, default='omp',
                     help="define sparsity_method: [omp, imp, etc.]")
 parser.add_argument('--yaml-path', type=str, default="./vgg13.yaml",
                     help='Path to yaml file')
-
+parser.add_argument('--show-graph', type=bool, default=False,help='to show 2d graph of one conv layer')
+parser.add_argument('--prune-channels-after-filter-prune',type=bool,default=False,help='to prunes the corresponding channels in the next CONV layer')
 args = parser.parse_args()
 
 # --- for dubeg use ---------
@@ -86,7 +88,46 @@ def get_dataloaders(args):
 
 
 # ============= the functions that you need to complete start from here =============
-import torch
+
+def visualize_weights_with_gradient(weights, title_prefix="Weights Visualization"):
+    """
+    Visualize the absolute values of weights with a color gradient for non-zero weights 
+    and red for zero weights.
+
+    Args:
+        weights (torch.Tensor): The 4D weight tensor of a layer (filters, channels, height, width).
+        title_prefix (str): Prefix for the figure title.
+    """
+    # Detach weights from computation graph and convert to NumPy
+    filters, channels, height, width = weights.shape
+    reshaped_weights = weights.detach().view(filters, -1).cpu().numpy()  # Detach before converting to numpy
+
+    # Use absolute values of weights for visualization
+    abs_weights = np.abs(reshaped_weights)
+
+    # Create a mask where all zeros are pruned weights and non-zero weights are highlighted
+    weight_mask = np.where(abs_weights == 0, 0, abs_weights)
+
+    # Normalize weights (now using absolute values)
+    norm = Normalize(vmin=np.min(abs_weights), vmax=np.max(abs_weights))
+
+    # Plot the weights visualization
+    plt.figure(figsize=(10, 6))
+
+    # Zero weights are shown in red
+    plt.imshow(weight_mask, cmap="Reds", aspect="auto", interpolation="nearest")
+
+    # Non-zero weights (absolute values) are visualized with a diverging colormap
+    plt.imshow(abs_weights, cmap="coolwarm", aspect="auto", alpha=0.5, interpolation="nearest", norm=norm)
+
+    # Add a colorbar
+    plt.colorbar(label="Weight Magnitude (Zero=pruned, Non-zero=gradient)")
+
+    # Title and labels
+    plt.title(f"{title_prefix}")
+    plt.xlabel("Channels × Kernel Height × Kernel Width")
+    plt.ylabel("Filters")
+    plt.show()
 
 def save_model(model, pruning_type, sparsity, accuracy,sparsity_type, save_path="./"):
     """
@@ -198,7 +239,7 @@ def filter_prune(tensor: torch.Tensor, sparsity: float) -> torch.Tensor:
     if tensor.ndim != 4:
         # print(f"Tensor is not 4D (shape: {tensor.shape}). Returning a mask with all ones.")
         return torch.ones_like(tensor)
-
+    
     # Step 1: Calculate how many filters should be pruned
     num_filters = tensor.shape[0]  # Number of output channels (filters)
     num_prune = int(num_filters * sparsity)  # Number of filters to prune
@@ -258,7 +299,7 @@ def apply_pruning(model, sparity_type, prune_ratio_dict):
                 # print(layer_name)
             pruning_mask = unstructured_prune(dict(model.named_parameters())[layer_name],tensor)
             prune_masks_store[layer_name] = pruning_mask
-            # print(pruning_mask)
+            # print(pruning_mask)        
             with torch.no_grad(): 
                 layer = dict(model.named_parameters())[layer_name] 
                 layer.data *= pruning_mask  
@@ -425,11 +466,16 @@ def masked_retrain(model, prune_masks, optimizer, loss_fn, data_loader, test_dat
     return model 
         
 
-def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs):
+def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,loss_fn,epochs,show_graph):
 
     model,prune_masks=apply_pruning(model, sparsity_type, prune_ratio_dict)
     model=masked_retrain(model, prune_masks, optimizer, loss_fn, train_loader,test_loader, epochs)
+    for layer_name, tensor in prune_ratio_dict.items():
+        if show_graph and layer_name=='features.3.weight':
+            visualize_weights_with_gradient(dict(model.named_parameters())[layer_name], title_prefix="Weight Visualization with Gradient")
+
     sparsity=test_sparity(model, sparsity_type)
+    
     # masked_retrain()
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -439,10 +485,9 @@ def oneshot_magnitude_prune(model, sparsity_type, prune_ratio_dict,train_loader,
     # Target sparsity ratio dict should contains the sparsity ratio of each layer
     # the per-layer sparsity ratio should be read from a external .yaml file
     # This function should also include the masked_retrain() function to conduct fine-tuning to restore the accuracy
+    return model
 
-def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_loader, test_loader, optimizer, loss_fn, epochs, use_cuda=False):
-
-
+def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_loader, test_loader, optimizer, loss_fn, epochs,show_graph, use_cuda=False):
     # Iterative pruning: start with a low sparsity and increase progressively
     current_sparsity_dict = {k: 0.0 for k in target_sparsity_dict}  # Initial sparsity is 0% for all layers
     num_iterations = 4 # One iteration per layer
@@ -465,44 +510,91 @@ def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_
         # Optionally, print the current sparsity for each layer after pruning
         print(f"Iteration {i + 1}: Sparsity updated to {current_sparsity_dict}")
     sparsity=test_sparity(model, sparsity_type)
-    
+    for layer_name, tensor in target_sparsity_dict.items():
+        if show_graph and layer_name=='features.3.weight':
+            visualize_weights_with_gradient(dict(model.named_parameters())[layer_name], title_prefix="Weight Visualization with Gradient")
+
     # Final test to evaluate the model after all iterations
     print("Final model evaluation:")
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     accuracy=test(model, device, test_loader)
     save_model(model, 'imp', sparsity, accuracy,sparsity_type)
+    return model
 
 
-def prune_channels_after_filter_prune():
-    pass
-    # 
-    # You need to implement this function to complete the following task:
-    # 1. This function takes a filter pruned and fine-tuned model as input
-    # 2. Find out the indices of all pruned filters in each CONV layer
-    # 3. Directly prune the corresponding channels (that has the same indices) in next CONV layer (on top of the filter-pruned model).
-    #    There is no need to fine-tune this model again.
-    # 4. Return the newly pruned model
 
-    # E.g., if you prune the filter_1, filter_4, filter_7 from the i_th CONV layer,
-    # Then, this function will let you prune the Channel_1, Channel_4, Channel_7, from the next CONV layer, i.e., (i+1)_th CONV layer.
 
-    # How to use this function:
-    # 1. You will apply this function on a filter-pruned model (after fine-tune/mask retraine)
-    # 2. There is no need to fine-tune the model again after apply this function
-    # 3. Compare the test accuracy before and after apply this function
-    #   
-    # E.g., 
-    #       pruned_model = your pruned and fine/tuned model
-    #       test_accuracy(pruned_model)
-    #       new_model = prune_channels_after_filter_prune(pruned_model)
-    #       test_accuracy(new_model)
 
-    # Answer the following questions in your report:
-    # 1. After apply this function (further prune the corresponding channels), what is the change in sparsity?
-    # 2. Will accuray decrease, increase, or not change?
-    # 3. Based on question 2, explain why?
-    # 4. Can we apply this function to ResNet and get the same conclusion? Why?
+def prune_channels_after_filter_prune(pruned_model):
+    """
+    Prunes the weights in the next convolutional layers by setting to zero the weights
+    corresponding to the pruned filters in the current convolutional layer.
+    This keeps the dimensions intact without changing the number of channels in the layers.
+    """
+    layers = list(pruned_model.children())  # Get layers from the model
+    # Iterate through layers
+    count=1
+    for i, layer in enumerate(layers):
+        # Check if the current layer is a Sequential block
+        if isinstance(layer, nn.Sequential):
+            sequential_layers = list(layer.children())
+            
+            for j, sublayer in enumerate(sequential_layers):
+                if isinstance(sublayer, nn.Conv2d):
+                    # Identify pruned filters in the current Conv2d layer
+                    weights = sublayer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                    pruned_indices = [
+                        idx for idx in range(weights.size(0)) if torch.all(weights[idx] == 0)
+                    ]
+                    
+                    if pruned_indices:
+                        
+                        # For each Conv2d layer after the current one, set corresponding weights to zero
+                        for k in range(j + 1, len(sequential_layers)):
+                            next_layer = sequential_layers[k]
+                            
+                            if isinstance(next_layer, nn.Conv2d):
+                                # Next layer's weights
+                                next_weights = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                                weights2 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                                pruned_indices2 = [
+                                        idx for idx in range(weights2.size(0)) if torch.all(weights2[idx] == 0)
+                                ]
+                                # Set the weights corresponding to the pruned channels to zero
+                                for pruned_idx in pruned_indices:
+                                    # Create a zero tensor of the same shape as the pruned weights
+                                    zero_weights = torch.zeros_like(next_weights[:, pruned_idx, :, :])
+
+                                    # Set the pruned channels to zero
+                                    next_weights[:, pruned_idx, :, :] = zero_weights
+
+                                # Update the next Conv2d layer weights
+                                next_layer.weight.data = next_weights
+                                if count==1:
+                                    print(pruned_indices)
+                                    weights1 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                                    pruned_indices1 = [
+                                        idx for idx in range(weights1.size(0)) if torch.all(weights1[idx] == 0)
+                                    ]
+                                    # print(weights1)
+                                    # print(next_layer.weight.data)
+                                    print(pruned_indices2)
+                                    print(pruned_indices1)
+                                    print(f"Filter at Position 4: {next_weights[4]}")  # 1st filter
+                                    
+                                    
+                                    count+=1
+                                break
+
+    return pruned_model
+
+
+
+
+
+
+
 
 
 def main():
@@ -548,24 +640,51 @@ def main():
     # test(model, device, test_loader)
 
     # ========================================
+    print()
+    print("+++++++++++++++++++++++++++++++ Example Commands ++++++++++++++++++++++++++++++++++++++++++++")
+    print("python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10")
+    print("python main.py --sparsity-method omp --sparsity-type filter --epochs 10")
+    print("python main.py --sparsity-method imp --sparsity-type unstructured --epochs 10")
+    print("python main.py --sparsity-method imp --sparsity-type filter --epochs 10")
+    print()
+    print("python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10 --show-graph True")
+    print("python main.py --sparsity-method omp --sparsity-type filter --epochs 10 --prune-channels-after-filter-prune True")
+    print("+++++++++++++++++++++++++++++++ Example Commands ++++++++++++++++++++++++++++++++++++++++++++")
+
     prune_ratio_dict=read_prune_ratios_from_yaml(args.yaml_path,args.load_model_path,args.sparsity_type)
     print()
     print("=========================================loaded yaml dictonary===========================================================")
     print(args.sparsity_type,prune_ratio_dict)
     print("=========================================loaded yaml dictonary===========================================================")
     print()
+    # test(model, device, test_loader)
     if args.sparsity_method =='omp':
-        oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs)
+        model=oneshot_magnitude_prune(model, args.sparsity_type, prune_ratio_dict,train_loader,test_loader,optimizer,criterion,args.epochs,args.show_graph)
     elif args.sparsity_method == 'imp':
-        iterative_magnitude_prune(model, args.sparsity_type, prune_ratio_dict, train_loader, test_loader, optimizer, criterion, args.epochs, device)
+        model=iterative_magnitude_prune(model, args.sparsity_type, prune_ratio_dict, train_loader, test_loader, optimizer, criterion, args.epochs,args.show_graph, device)
     else:
         print("Invalid sparsity method. Choose either 'omp' or 'imp'.")
+    if args.prune_channels_after_filter_prune:
+        print()
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        test(model, device, test_loader)
+        test_sparity(model, args.sparsity_type)
+        pruned_model = prune_channels_after_filter_prune(model)
+        print()
+        print()
+        print()
+        print("Final model evaluation: after prune_channels_after_filter_prune")
+        test(pruned_model, device, test_loader)
+        test_sparity(pruned_model, args.sparsity_type)
 
 
 if __name__ == '__main__':
     main()
 
-#python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10
-#python main.py --sparsity-method omp --sparsity-type filter --epochs 10
+#python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10 
+#python main.py --sparsity-method omp --sparsity-type filter --epochs 10 
 #python main.py --sparsity-method imp --sparsity-type unstructured --epochs 10
 #python main.py --sparsity-method imp --sparsity-type filter --epochs 10
+
+#python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10 --show-graph True
+#python main.py --sparsity-method omp --sparsity-type filter --epochs 10 --prune-channels-after-filter-prune True

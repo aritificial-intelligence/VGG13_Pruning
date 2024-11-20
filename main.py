@@ -525,11 +525,6 @@ def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_
 
 
 
-
-
-import torch
-import torch.nn as nn
-
 def prune_channels_after_filter_prune(pruned_model):
     """
     Prunes the weights in the next convolutional layers by setting to zero the weights
@@ -681,4 +676,4 @@ if __name__ == '__main__':
 #python main.py --sparsity-method imp --sparsity-type filter --epochs 10
 
 #python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10 --show-graph True
-#python main.py --sparsity-method omp --sparsity-type filter --epochs 2 --prune-channels-after-filter-prune True
+#python main.py --sparsity-method omp --sparsity-type filter --epochs 10 --prune-channels-after-filter-prune True

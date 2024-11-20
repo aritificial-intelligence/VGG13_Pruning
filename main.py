@@ -340,12 +340,13 @@ def test_sparity(model, sparsity_type):
         if "weight" in name and param.requires_grad:
             if sparsity_type == "unstructured":
                 # Count zero and non-zero elements in the weight tensor
-                zeros = torch.sum(param == 0).item()
-                total = param.numel()
-                sparsity = zeros / total * 100
-                print(f"(zero/total) weights of {name} is: ({zeros}/{total}). Sparsity is: {sparsity:.2f}%")
-                total_zeros += zeros
-                total_nonzeros += total - zeros
+                if param.dim() == 4:
+                    zeros = torch.sum(param == 0).item()
+                    total = param.numel()
+                    sparsity = zeros / total * 100
+                    print(f"(zero/total) weights of {name} is: ({zeros}/{total}). Sparsity is: {sparsity:.2f}%")
+                    total_zeros += zeros
+                    total_nonzeros += total - zeros
 
             elif sparsity_type == "filter":
                 # Check filter sparsity (assume param is 4D: [out_channels, in_channels, h, w])
@@ -526,65 +527,61 @@ def iterative_magnitude_prune(model, sparsity_type, target_sparsity_dict, train_
 
 
 
+import torch
+import torch.nn as nn
+
 def prune_channels_after_filter_prune(pruned_model):
     """
     Prunes the weights in the next convolutional layers by setting to zero the weights
     corresponding to the pruned filters in the current convolutional layer.
     This keeps the dimensions intact without changing the number of channels in the layers.
+    
+    Args:
+        pruned_model (torch.nn.Module): A filter-pruned model.
+        
+    Returns:
+        torch.nn.Module: The updated model with channels pruned based on the pruned filters.
     """
     layers = list(pruned_model.children())  # Get layers from the model
-    # Iterate through layers
-    # count=1
+    
     for i, layer in enumerate(layers):
-        # Check if the current layer is a Sequential block
+        # If the layer is a Sequential block, iterate through its sublayers
         if isinstance(layer, nn.Sequential):
             sequential_layers = list(layer.children())
             
             for j, sublayer in enumerate(sequential_layers):
                 if isinstance(sublayer, nn.Conv2d):
-                    # Identify pruned filters in the current Conv2d layer
+                    # Get weights of the current Conv2d layer
                     weights = sublayer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
+                    
+                    # Identify pruned filters (filters where all weights are zero)
                     pruned_indices = [
                         idx for idx in range(weights.size(0)) if torch.all(weights[idx] == 0)
                     ]
+                    
+                    # If there are pruned filters, apply corresponding channel pruning in the next Conv2d layer
                     if pruned_indices:
-                        # For each Conv2d layer after the current one, set corresponding weights to zero
+                        # Iterate over subsequent layers to apply pruning
                         for k in range(j + 1, len(sequential_layers)):
                             next_layer = sequential_layers[k]
                             
                             if isinstance(next_layer, nn.Conv2d):
-                                # Next layer's weights
+                                # Get weights of the next Conv2d layer
                                 next_weights = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
                                 
-                                # weights2 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
-                                # pruned_indices2 = [
-                                #         idx for idx in range(weights2.size(0)) if torch.all(weights2[idx] == 0)
-                                # ]
-
-                                # Set the weights corresponding to the pruned channels to zero
-                                mask = torch.ones_like(next_weights)  
+                                # Create a mask to zero out the corresponding channels
+                                mask = torch.ones_like(next_weights)
                                 for pruned_idx in pruned_indices:
-                                    mask[pruned_idx, :, :, :] = 0  # Set pruned channels to zero in the mask
-                                next_weights *= mask  # Set pruned channels to zero
+                                    mask[:, pruned_idx, :, :] = 0  # Set pruned channels to zero in the mask
+                                
+                                # Apply the mask to the next layer's weights
+                                next_weights *= mask
+                                
                                 # Update the next Conv2d layer weights
                                 next_layer.weight.data = next_weights
-                                # if count==1:
-                                #     print(pruned_indices)
-                                #     weights1 = next_layer.weight.data  # Shape: (out_channels, in_channels, kernel_h, kernel_w)
-                                #     pruned_indices1 = [
-                                #         idx for idx in range(weights1.size(0)) if torch.all(weights1[idx] == 0)
-                                #     ]
-                                    # print(weights1)
-                                    # print(next_layer.weight.data)
-                                    # print(pruned_indices2)
-                                    # print(pruned_indices1)
-                                    # print(f"Filter at Position 4: {next_weights[4]}")  # 1st filter
-                                    
-                                    
-                                    # count+=1
-                                break
-
+                                break  # Move to the next sublayer only after pruning one Conv2d layer
     return pruned_model
+
 
 
 
@@ -665,14 +662,14 @@ def main():
         print()
         print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         test(model, device, test_loader)
-        test_sparity(model, args.sparsity_type)
+        test_sparity(model, 'unstructured')
         pruned_model = prune_channels_after_filter_prune(model)
         print()
-        print()
-        print()
-        print("Final model evaluation: after prune_channels_after_filter_prune")
+        print("Sparsity and accuracy after prune_channels_after_filter_prune function call")
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         test(pruned_model, device, test_loader)
-        test_sparity(pruned_model, args.sparsity_type)
+        test_sparity(pruned_model, 'unstructured')
 
 
 if __name__ == '__main__':
@@ -684,4 +681,4 @@ if __name__ == '__main__':
 #python main.py --sparsity-method imp --sparsity-type filter --epochs 10
 
 #python main.py --sparsity-method omp --sparsity-type unstructured --epochs 10 --show-graph True
-#python main.py --sparsity-method omp --sparsity-type filter --epochs 10 --prune-channels-after-filter-prune True
+#python main.py --sparsity-method omp --sparsity-type filter --epochs 2 --prune-channels-after-filter-prune True
